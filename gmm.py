@@ -16,7 +16,7 @@ import random
              name               name list of images (string vector)
              outpath            location of outputs in OS (string)
              x                  obeservation (N x 6 float matrix)
-             cluster            cluster number (1 x N char vector)
+             cluster            cluster number (N x 1 char vector)
              img                image to be identified (object)
              path_new           locaiton of output images in OS (string)
 """
@@ -58,7 +58,7 @@ def read_and_save(filepath):
                 print("Warning:",e)
         #Cluster using GMM
         x = Getfeature(img, name)    
-        cluster = GMM(x)
+        cluster = GMM(x, len(name))
         #Save into different folders
         for i in range(len(name)):
             img = cv.imread(name[i])
@@ -85,11 +85,11 @@ def read_and_save(filepath):
         for i in range(len(name)):
             img = cv.imread(name[i])
             b,g,r = cv.split(img)
-            n_pixels = np.size(np.size(b))
+            n_pixels = np.size(b)
             # Average value of BGR
-            x[i,0] = (sum(sum(b))/n_pixels)./255
-            x[i,1] = (sum(sum(g))/n_pixels)./255
-            x[i,2] = (sum(sum(r))/n_pixels)./255
+            x[i,0] = (np.sum(b)/n_pixels)./255
+            x[i,1] = (np.sum(g)/n_pixels)./255
+            x[i,2] = (np.sum(r)/n_pixels)./255
             # Entropy of BGR
             x[i,3] = entropy(b)
             x[i,4] = entropy(g)
@@ -100,14 +100,14 @@ def read_and_save(filepath):
         # //input   channel       color channel to be computed (matrix)
         # //param   count         number of pixels for different values (vector)
         #           y             pixel values (vector)
-        #           total         total number of pixels (scalar)
+        #           total         total number of pixels (int)
         #           p             Bayes Posterior Probability (vector)
         #           logp          logrithm of p with base 2 (vector)
-        #           entropy_step  entropy of each value (scalar)
-        # //ouput   entropy       total entropy (scalar)
+        #           entropy_step  entropy of each value (float)
+        # //ouput   entropy       total entropy (float)
         def entropy(channel):
             [count, y] = np.histogram(channel,bins=np.arange(255))
-            total = sum(count)
+            total = np.sum(count)
             entropy = 0
             p = np.zeros(256)
             for i in range(256):
@@ -122,41 +122,69 @@ def read_and_save(filepath):
     """
     Gaussian Mixture Model Clustering funciton (GMM):
     //input   x          observation (N x 6 float matrix)
-              T          truncation level (scalar)
+    //param   T          truncation level (scalar)
+              N          number of observations (int)
               miu        centroids of clusters (T x 6 float matrix)
               sigma      standard deviation (6 x 6 x T float matrix)
               pi         cluster weight (1 x T float vector)
-              flag       cluster number (1 x N int vector)
-    //output  cluster    cluster number (1 x N char vector)
+              flag       cluster number (N x 1 int vector)
+    //output  cluster    cluster number (N x 1 char vector)
     """
     def GMM(x):
         # Initialize
-        flag = np.zeros_like(x)
-        T = 3
-        [miu, sigma, pi] = param_init(x,T)
-        # Update
-        for k in range(T):
-            z[i,k] = pi * Gaussian_prob(x[i],miu[k,:],sigma[:,:,k],T)
-            
-            
+        [N, T] = np.shape(x)
+        N = int(N)
+        T = int(T)
+        flag = np.zeros((N,1))
+        [miu, sigma, pi] = param_init(x)
+        tolerance = 1e-15
+        Lprev = -float("inf")
+        while(Lprev > tolerance):
+            # Update
+            z = pi * Gaussian_prob(x,miu,sigma)
         cluster = chr((flag + 48))
         return cluster
     
-        # Initialize miu, sigma, pi
-        def param_init(x,T):
+        # Initialize miu, sigma, pi using k-means method
+        # //param    x_k: observations in cluster k
+        def param_init(x):
+            [N, T] = np.shape(x)
+            N = int(N)
+            T = int(T)
             miu = random.sample(x,T)
             sigma = np.zeros((6,6,T))
             pi = np.zeros(T)
-        return [miu, sigma, pi]
+            distant = np.zeros_like(x)
+            for i in range(T):
+                # calculate distant
+                tmp = x - np.dot(np.ones((N,1)),miu[i])
+                tmp = tmp * tmp
+                tmp = np.sum(tmp,axis=1)
+                distant[:,i] = tmp.reshape(N,1)
+                cluster = np.argmin(distant,axis=1)
+                cluster = cluster.reshape(N,1)
+            for i in range(T):
+                x_k = x[cluster == i, :]
+                pi[i] = int(np.size(x_k,axis=0))/N
+                sigma[:,:,i] = np.cov(x_i)
+            return [miu, sigma, pi]
 
         # Gaussian Posterior Probability
-        def Gaussian_prob(x_i, miu_k, sigma_k)
-            xshift = x_i - np.ones((N,1)) * miu_k
-            inv_sigma_k = inv(siamg_k)
-            tmp = sum(sum((xshift * inv_sigma_k) * xshift))
-            coef = (2*np.pi)^(-3) * sqrt(np.linalg.det(inv_sigma_k))
-            prob = coef * np.exp(-0.5 * tmp)
+        # //param    inv_sigma: inverse matrix of sigma
+        def Gaussian_prob(x, miu, sigma):
+            [N, T] = np.shape(x)
+            N = int(N)
+            T = int(T)
+            prob = np.zeros_like(x)
+            for k in range(T):
+                x_shift = x - np.dot(np.ones((N,1)),miu[k])
+                inv_sigma = np.linalg.inv(siamg[:,:,k])
+                tmp = np.sum((np.dot(x_shift,inv_sigma) * xshift),axis=1)
+                coef = (2*np.pi)^(-T/2) * np.sqrt(np.linalg.det(inv_sigma_k))
+                prob[:,k] = coef * np.exp(-0.5 * tmp)
             return prob
+        
+        
 """
     Syntax Error Function:
     Print Info when error of options detected
