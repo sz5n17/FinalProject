@@ -16,7 +16,7 @@ import random
              name               name list of images (string vector)
              outpath            location of outputs in OS (string)
              x                  obeservation (N x 6 float matrix)
-             cluster            cluster number (N x 1 char vector)
+             cluster            cluster number (N x 1 string vector)
              img                image to be identified (object)
              path_new           locaiton of output images in OS (string)
 """
@@ -122,60 +122,94 @@ def read_and_save(filepath):
     """
     Gaussian Mixture Model Clustering funciton (GMM):
     //input   x          observation (N x 6 float matrix)
-    //param   T          truncation level (scalar)
+    //param   T          truncation level (int)
+              D          dimension of a single observation (int)
               N          number of observations (int)
               miu        centroids of clusters (T x 6 float matrix)
               sigma      standard deviation (6 x 6 x T float matrix)
               pi         cluster weight (1 x T float vector)
+              tolerance  threshold for convergence (float)
+              p          Gaussian posterior probility (N x T float matrix)
+              z          latent variable (prob of i-th observation by k-th cluster) (N x T float matrix)
+              Nk         sum of latent variable (1 x T float vector)
               flag       cluster number (N x 1 int vector)
-    //output  cluster    cluster number (N x 1 char vector)
+    //output  cluster    cluster number (N x 1 string vector)
     """
     def GMM(x):
         # Initialize
-        [N, T] = np.shape(x)
+        [N, D] = np.shape(x)
         N = int(N)
-        T = int(T)
+        D = int(D)
         flag = np.zeros((N,1))
-        [miu, sigma, pi] = param_init(x)
+        T = 3
+        [miu, sigma, pi] = param_init(x,T)
         tolerance = 1e-15
         Lprev = -float("inf")
-        while(Lprev > tolerance):
-            # Update
-            z = pi * Gaussian_prob(x,miu,sigma)
-        cluster = chr((flag + 48))
-        return cluster
+        while(True):
+            # Estimation
+            p = Gaussian_prob(x, miu, sigma, T)
+            z = np.dot(np.ones((N,1)),pi) * p
+            z = z / np.dot(np.sum(z,axis=1).reshape(N,1), np.ones(T))
+            # Maximization and updating
+            Nk = np.sum(z,axis=0)
+            # Weights
+            pi = Nk / N
+            # Centroids
+            miu = np.dot(np.diag(1/Nk),np.dot(z.T,x))
+            # Sigma
+            for k in range(T):
+                x_shift = x - np.dot(np.ones((N,1)),miu[k])
+                tmp = np.dot(np.diag(z[:,k]),x_shift)
+                tmp = np.dot(x_shift.T,tmp)
+                sigma[:,:,k] = tmp/Nk[k]
+            L = np.sum(np.log(np.dot(p, pi.reshape(T,1))))
+            if L - Lprev < tolerance
+                break
+            Lprev = L
+        # Once convergencing, return model
+        model = []
+        model.x = x
+        model.T = T
+        model.miu = miu
+        model.sigma = sigma
+        model.p = Gaussian_prob(model.x, model.miu, model.sigma, model.T)
+        flag = np.argmax(model.p,axis=1)
+        for i in range(len(flag)):
+            cluster[i] = str(flag[i])
+        model.cluster = cluster
+        return model
     
         # Initialize miu, sigma, pi using k-means method
         # //param    x_k: observations in cluster k
-        def param_init(x):
-            [N, T] = np.shape(x)
+        def param_init(x,T):
+            [N, D] = np.shape(x)
             N = int(N)
-            T = int(T)
+            D = int(D)
             miu = random.sample(x,T)
             sigma = np.zeros((6,6,T))
             pi = np.zeros(T)
-            distant = np.zeros_like(x)
-            for i in range(T):
+            distant = np.zeros((N,T))
+            for k in range(T):
                 # calculate distant
-                tmp = x - np.dot(np.ones((N,1)),miu[i])
+                tmp = x - np.dot(np.ones((N,1)),miu[k])
                 tmp = tmp * tmp
                 tmp = np.sum(tmp,axis=1)
                 distant[:,i] = tmp.reshape(N,1)
                 cluster = np.argmin(distant,axis=1)
                 cluster = cluster.reshape(N,1)
-            for i in range(T):
-                x_k = x[cluster == i, :]
-                pi[i] = int(np.size(x_k,axis=0))/N
-                sigma[:,:,i] = np.cov(x_i)
+            for k in range(T):
+                x_k = x[cluster == k, :]
+                pi[k] = int(np.size(x_k,axis=0))/N
+                sigma[:,:,k] = np.cov(x_k)
             return [miu, sigma, pi]
 
         # Gaussian Posterior Probability
         # //param    inv_sigma: inverse matrix of sigma
-        def Gaussian_prob(x, miu, sigma):
-            [N, T] = np.shape(x)
+        def Gaussian_prob(x, miu, sigma, T):
+            [N, D] = np.shape(x)
             N = int(N)
-            T = int(T)
-            prob = np.zeros_like(x)
+            D = int(D)
+            prob = np.zeros((N,T))
             for k in range(T):
                 x_shift = x - np.dot(np.ones((N,1)),miu[k])
                 inv_sigma = np.linalg.inv(siamg[:,:,k])
@@ -183,6 +217,7 @@ def read_and_save(filepath):
                 coef = (2*np.pi)^(-T/2) * np.sqrt(np.linalg.det(inv_sigma_k))
                 prob[:,k] = coef * np.exp(-0.5 * tmp)
             return prob
+        
         
         
 """
