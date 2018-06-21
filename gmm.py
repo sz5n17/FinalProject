@@ -23,15 +23,17 @@ import random
 """
 def entropy(channel):
     [count, y] = np.histogram(channel,bins=np.arange(257))
-    total = np.sum(count)
-    entropy = 0
+    total = float(np.sum(count))
+    entropy = 0.0
     p = np.zeros(256)
+    logp = np.zeros_like(p)
     for i in range(256):
-        p[i] = count[i]/total
+        p[i] = float(count[i])/total
         if p[i] != 0:
-            logp[i]=log2(p[i])
+            logp[i]= np.log2(p[i])
             entropy_step = - p[i]*logp[i]
             entropy = entropy + entropy_step
+    entropy = entropy/np.log2(256.0)
     return entropy
 """
 //Parent function:   Getfeature function
@@ -43,9 +45,9 @@ def entropy(channel):
           x[i,0]     normalized average value of Blue channels (float)
           x[i,1]     normalized average value of Green channels (float)
           x[i,2]     normalized average value of Red channels (float)
-          x[i,3]     entropy of Blue color (float)
-          x[i,4]     entropy of Greeen color (float)
-          x[i,5]     entropy of Red color (float)
+          x[i,3]     normalized entropy of Blue color (float)
+          x[i,4]     normalized entropy of Greeen color (float)
+          x[i,5]     normalized entropy of Red color (float)
 """
 def Getfeature(name):
     x = np.ones((len(name),6))
@@ -57,13 +59,13 @@ def Getfeature(name):
         r = r.astype(float)
         n_pixels = float(np.size(b))
         # Average value of BGR
-        x[i,0] = (np.sum(b)/n_pixels)/255.0
-        x[i,1] = (np.sum(g)/n_pixels)/255.0
-        x[i,2] = (np.sum(r)/n_pixels)/255.0
+        x[i,0] = (np.sum(b)/n_pixels)/255.0*1.5
+        x[i,1] = (np.sum(g)/n_pixels)/255.0*1.5
+        x[i,2] = (np.sum(r)/n_pixels)/255.0*1.5
         # Entropy of BGR
-        x[i,3] = entropy(b)
-        x[i,4] = entropy(g)
-        x[i,5] = entropy(r)
+        x[i,3] = entropy(b)*1.5
+        x[i,4] = entropy(g)*1.5
+        x[i,5] = entropy(r)*1.5
     return x
 
 
@@ -86,6 +88,8 @@ def param_init(x,T):
     N = int(N)
     D = int(D)
     miu = random.sample(x,T)
+    print("miu")
+    print(miu)
     sigma = np.zeros((6,6,T))
     pi = np.zeros(T)
     distance = np.zeros((N,T))
@@ -94,13 +98,16 @@ def param_init(x,T):
         tmp = x - np.dot(np.ones((N,1)),miu[k].reshape(1,D))
         tmp = tmp * tmp
         tmp = np.sum(tmp,axis=1)
-        distance[:,i] = tmp.reshape(N)
+        distance[:,k] = tmp.reshape(N)
     cluster = np.argmin(distance,axis=1)
     cluster = cluster.reshape(N)
     for k in range(T):
         x_k = x[cluster == k, :]
+        print("k=")
+        print(k)
+        print(x_k)
         pi[k] = float(np.size(x_k,axis=0))/N
-        sigma[:,:,k] = np.cov(x_k.T)
+        sigma[:,:,k] = np.cov(x_k,rowvar=False)
     return [miu, sigma, pi]
 """
 //Child-function B:   Gaussian Posterior Probability
@@ -121,6 +128,7 @@ def Gaussian_prob(x, miu, sigma, T):
         x_shift = x - np.dot(np.ones((N,1)),miu[k].reshape(1,D))
         inv_sigma = np.linalg.inv(sigma[:,:,k])
         inv_sigma.dtype = 'float'
+        print(inv_sigma)
         tmp = np.sum((np.dot(x_shift,inv_sigma) * x_shift),axis=1)
         coef = np.power((2*np.pi),(-float(T)/2)) * np.sqrt(np.linalg.det(inv_sigma))
         prob[:,k] = coef * np.exp(-0.5 * tmp)
@@ -148,6 +156,7 @@ def GMM(x):
     N = int(N)
     D = int(D)
     flag = np.zeros((N,1))
+    cluster = np.zeros_like(flag)
     T = 3
     [miu, sigma, pi] = param_init(x,T)
     tolerance = 1e-15
