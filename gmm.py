@@ -307,7 +307,7 @@ def read_and_save(filepath):
 
     #Clustering using GMM
     x = Getfeature(name)
-    #np.savetxt('data.txt',x,delimiter=' ',newline='\n')
+    np.savetxt('data.txt',x,delimiter=' ',newline='\n')
     #Perform PCA
     pca = PCA(n_components='mle',svd_solver='full')
     y = pca.fit_transform(x)
@@ -316,7 +316,7 @@ def read_and_save(filepath):
     cluster = cluster.astype(str) 
     print(count, cluster_number)
     cluster = cluster.astype(str)
-    with open('output.csv','w') as output:
+    with open('output.csv','wb') as output:
         writer = csv.writer(output)
         writer.writerow(['index','name','cluster','time'])
         for i in range(len(name)):
