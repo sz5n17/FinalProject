@@ -1,11 +1,17 @@
 #  Library
 import cv2 as cv
 import numpy as np
+import scipy
 import os
 import yaml
 import sys
 import math
 import random
+import csv
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import pdb
 
 """Function Definitions"""
 
@@ -59,38 +65,89 @@ def Getfeature(name):
         r = r.astype(float)
         n_pixels = float(np.size(b))
         # Average value of BGR
-        x[i,0] = (np.sum(b)/n_pixels)/255.0*1.5
-        x[i,1] = (np.sum(g)/n_pixels)/255.0*1.5
-        x[i,2] = (np.sum(r)/n_pixels)/255.0*1.5
+        x[i,0] = (np.sum(b)/n_pixels)/255.0
+        x[i,1] = (np.sum(g)/n_pixels)/255.0
+        x[i,2] = (np.sum(r)/n_pixels)/255.0
         # Entropy of BGR
-        x[i,3] = entropy(b)*1.5
-        x[i,4] = entropy(g)*1.5
-        x[i,5] = entropy(r)*1.5
+        x[i,3] = entropy(b)
+        x[i,4] = entropy(g)
+        x[i,5] = entropy(r)
     return x
 
 
 """GMM Clustering Funciton"""
 """
-//Child-function A:   Initialize miu, sigma, pi using k-means method
-//input    x          obeservation  (N x 6 float matrix)
-           T          truncation level (int)
+//Child-function:        Calculate Wk
+//input
+//param
+//output
+"""
+def Wk_calc(x,cluster_number):
+    km = KMeans(cluster_number).fit(x)
+    centers = km.cluster_centers_
+    labels = km.labels_
+    Wk = 0
+    for k in range(len(centers[:,0])):
+        tmp = x[labels==k,:]
+        N_tmp = len(tmp[:,0])
+        disp = tmp - centers[k]
+        disp = disp * disp
+        sum = np.sum(disp)
+        Wk_tmp = sum/(N_tmp*2)
+        Wk = Wk + Wk_tmp
+    return Wk
+"""
+//Child-function:        Get optimum cluster number using Gap Statistic
+//input     max_cluster    Maximum of cluster number (int)
+//param     gap
+            refWk
+            x_min
+            x_max
+            Wk
+//output    T              optimum cluster number (int)
+"""
+def gap_statistic(x,nrefs,max_cluster):
+    gap = np.zeros(max_cluster)
+    sd = np.zeros(max_cluster)
+    for index,k in enumerate(range(1,max_cluster)):
+        refWk = np.zeros(nrefs)
+        x_min = np.amin(x)
+        x_max = np.amax(x)
+        for i in range(nrefs):
+            # Create new random reference set
+            randomReference = (x_max - x_min) * np.random.random_sample(size=x.shape) + x_min * np.ones(x.shape)
+            # Fit to it
+            refWk[i] = Wk_calc(randomReference,cluster_number=k)
+        Wk = Wk_calc(x,cluster_number=k)
+        gap[index] = np.mean(np.log(refWk)) - np.log(Wk)
+        sd[index] = np.std(np.log(refWk))
+    sd = np.sqrt(1+1/nrefs)*sd
+    T = np.argmax(gap) + 1
+    return T
+    
+"""
+//Child-function:   Initialize miu, sigma, pi using k-means method
+//input    x          obeservation  (N x D float matrix)
+           T          optimum cluster number (int)
 //param    D          dimension of a single observation (int)
            N          number of observations (int)
            x_k        observations in cluster k
            cluster    cluster number (N x 1 int vector)
            distance   distance between observations and centroids (N x T float matrix)
-//output   miu        centroids of clusters (T x 6 float matrix)
-           sigma      standard deviation (6 x 6 x T float matrix)
+//output   miu        centroids of clusters (T x D float matrix)
+           sigma      standard deviation (D x D x T float matrix)
            pi         cluster weight (1 x T float vector)
 """
 def param_init(x,T):
-    [N, D] = np.shape(x)
-    N = int(N)
-    D = int(D)
+    if len(np.shape(x))>1:
+        [N, D] = np.shape(x)
+        N = int(N)
+        D = int(D)
+    else:
+        N = len(x)
+        D = 1
     miu = random.sample(x,T)
-    print("miu")
-    print(miu)
-    sigma = np.zeros((6,6,T))
+    sigma = np.zeros((D,D,T))
     pi = np.zeros(T)
     distance = np.zeros((N,T))
     for k in range(T):
@@ -103,61 +160,63 @@ def param_init(x,T):
     cluster = cluster.reshape(N)
     for k in range(T):
         x_k = x[cluster == k, :]
-        print("k=")
-        print(k)
-        print(x_k)
         pi[k] = float(np.size(x_k,axis=0))/N
         sigma[:,:,k] = np.cov(x_k,rowvar=False)
     return [miu, sigma, pi]
 """
-//Child-function B:   Gaussian Posterior Probability
-//input    T          truncation level (int)
-           miu        centroids of clusters (T x 6 float matrix)
-           sigma      standard deviation (6 x 6 x T float matrix)
+//Child-function:   Gaussian Posterior Probability
+//input    T          optimum cluster number (int)
+           miu        centroids of clusters (T x D float matrix)
+           sigma      standard deviation (D x D x T float matrix)
            pi         cluster weight (1 x T float vector)
 //param    D          dimension of a single observation (int)
            N          number of observations (int)
 //output   prob       Gaussian posterior probability
 """
 def Gaussian_prob(x, miu, sigma, T):
-    [N, D] = np.shape(x)
-    N = int(N)
-    D = int(D)
+    if len(np.shape(x))>1:
+        [N, D] = np.shape(x)
+        N = int(N)
+        D = int(D)
+    else: 
+        N = len(x)
+        D = 1
     prob = np.zeros((N,T))
     for k in range(T):
         x_shift = x - np.dot(np.ones((N,1)),miu[k].reshape(1,D))
         inv_sigma = np.linalg.inv(sigma[:,:,k])
         inv_sigma.dtype = 'float'
-        print(inv_sigma)
         tmp = np.sum((np.dot(x_shift,inv_sigma) * x_shift),axis=1)
         coef = np.power((2*np.pi),(-float(T)/2)) * np.sqrt(np.linalg.det(inv_sigma))
         prob[:,k] = coef * np.exp(-0.5 * tmp)
     return prob
 """
 Gaussian Mixture Model Clustering funciton (GMM):
-//input   x          observation (N x 6 float matrix)
-//param   T          truncation level (int)
-          D          dimension of a single observation (int)
+//input   x          observation (N x D float matrix)
+//param   D          dimension of a single observation (int)
           N          number of observations (int)
-          miu        centroids of clusters (T x 6 float matrix)
-          sigma      standard deviation (6 x 6 x T float matrix)
+          miu        centroids of clusters (T x D float matrix)
+          sigma      standard deviation (D x D x T float matrix)
           pi         cluster weight (1 x T float vector)
           tolerance  threshold for convergence (float)
           p          Gaussian posterior probility (N x T float matrix)
           z          latent variable (prob of i-th observation by k-th cluster) (N x T float matrix)
           Nk         sum of latent variable (1 x T float vector)
           flag       cluster number (N x 1 int vector)
-          cluster    cluster number (N x 1 string vector)
-//output  model      all model informaiton (object)
+//output  cluster    cluster number (N x 1 string vector)
+          T          optimum cluster number (int)
 """
 def GMM(x):
     # Initialize
-    [N, D] = np.shape(x)
-    N = int(N)
-    D = int(D)
-    flag = np.zeros((N,1))
-    cluster = np.zeros_like(flag)
-    T = 3
+    if len(np.shape(x))>1:
+        [N, D] = np.shape(x)
+        N = int(N)
+        D = int(D)
+    else:
+        N = len(x)
+        D = 1
+    T = gap_statistic(x,nrefs=20,max_cluster=10)
+    cluster = np.zeros((N,1))
     [miu, sigma, pi] = param_init(x,T)
     tolerance = 1e-15
     Lprev = -float("inf")
@@ -182,18 +241,11 @@ def GMM(x):
         if L - Lprev < tolerance:
             break
         Lprev = L
-    # Once convergencing, return model
-    model = []
-    model.x = x
-    model.T = T
-    model.miu = miu
-    model.sigma = sigma
-    model.p = Gaussian_prob(model.x, model.miu, model.sigma, model.T)
-    flag = np.argmax(model.p,axis=1)
-    for i in range(len(flag)):
-        cluster[i] = str(flag[i])
-    model.cluster = cluster
-    return model
+    # Once convergencing
+    p = Gaussian_prob(x, miu, sigma, T)
+    cluster = np.argmax(p,axis=1)
+    """.astype(str)"""
+    return cluster, T
    
 
      
@@ -205,6 +257,7 @@ def GMM(x):
              name               name list of images (string vector)
              outpath            location of outputs in OS (string)
              x                  obeservation (N x 6 float matrix)
+             T                  optimum cluster number (int)
              cluster            cluster number (N x 1 string vector)
              img                image to be identified (object)
              path_new           locaiton of output images in OS (string)
@@ -212,6 +265,7 @@ def GMM(x):
 def read_and_save(filepath):
     # Load mission
     print('Loading mission.yaml')
+    filepath = str(filepath)
     mission = filepath + 'mission.yaml'
     with open(mission,'r') as stream:
         load_data = yaml.load(stream)
@@ -220,15 +274,20 @@ def read_and_save(filepath):
             image_filepath = load_data['image']['filepath']
     image_fullpath = filepath + image_filepath
     os.chdir(image_fullpath)
+    with open('FileTime.csv','r') as filetime:
+        reader = csv.DictReader(filetime)
+        index = [row['index'] for row in reader]
+        reader = csv.DictReader(filetime)
+        time = [row['time'] for row in reader]
     name = np.loadtxt('image_name.txt',dtype=str)
     # Check if the data are in folder raw
     sub_path = image_fullpath.split(os.sep)
+    flag_f = False
     for i in range(1,(len(sub_path))):
         if sub_path[i]=='raw':
             flag_f = True
     if flag_f == False:
         print('Check folder structure contains "raw"')
-    # Cluster and Save
     sub_out = sub_path
     outpath = sub_out[0]
     proc_flag = 0
@@ -245,15 +304,36 @@ def read_and_save(filepath):
                 os.mkdir(outpath)
             except Exception as e:
                 print("Warning:",e)
-        #Cluster using GMM
-        x = Getfeature(name)
-        cluster = GMM(x)
-        #Save into different folders
-        for i in range(len(name)):
-            img = cv.imread(name[i])
-            path_new = outpath + os.sep + cluster[i] + os.sep+ name[i]
-            cv.imwrite(path_new,img)
 
+    #Clustering using GMM
+    x = Getfeature(name)
+    #np.savetxt('data.txt',x,delimiter=' ',newline='\n')
+    #Perform PCA
+    pca = PCA(n_components='mle',svd_solver='full')
+    y = pca.fit_transform(x)
+    cluster, T = GMM(y[:,0:2])
+    count, cluster_number = np.histogram(cluster,bins=np.arange(T+1))
+    cluster = cluster.astype(str) 
+    print(count, cluster_number)
+    cluster = cluster.astype(str)
+    with open('output.csv','w') as output:
+        writer = csv.writer(output)
+        writer.writerow(['index','name','cluster','time'])
+        for i in range(len(name)):
+            writer.writerow([ index[i],name[i],cluster[i] ])
+    """
+    #Save into different folders
+    for i in range(len(name)):
+        img = cv.imread(name[i])
+        path_tmp = outpath + os.sep + cluster[i]
+        if os.path.isdir(path_tmp)==0:
+            try:
+                os.mkdir(path_tmp)
+            except Exception as e:
+                print("Warning:",e)
+        path_new = path_tmp + os.sep + name[i]
+        cv.imwrite(path_new,img)
+    """
 
 """
     Syntax Error Function:
